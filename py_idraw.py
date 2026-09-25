@@ -24,7 +24,7 @@ class IDraw:
         self.set_speed(default_speed)
         self.set_coordinate_mode(CoordinateMode.ABSOLUTE)
         self.set_unit(unit)
-        self.set_current_position_as_x0y0
+        self.set_current_position_as_x0y0()
 
     def send_gcode(self, gcode: str):
         formatted = gcode
@@ -38,8 +38,10 @@ class IDraw:
             if resp == 'ok':
                 return
             if resp.startswith('error'):
+                print(resp)
                 return
             if resp.startswith('busy'):
+                print(resp)
                 return
 
     def set_unit(self, unit: Unit):
@@ -82,6 +84,12 @@ class IDraw:
             self.set_coordinate_mode(CoordinateMode.ABSOLUTE)
             self.send_gcode(f"G00 Z{height}")
             self.set_coordinate_mode(temp)
+
+    def arc_cw(self, x: float, y: float, i: float, j: float):
+        self.send_gcode(f"G02 X{x} Y{y} I{i} J{j}")
+
+    def arc_ccw(self, x: float, y: float, i: float, j: float):
+        self.send_gcode(f"G03 X{x} Y{y} I{i} J{j}")
 
     def lower_pen(self):
         self.set_height(self.pen_down_height)
