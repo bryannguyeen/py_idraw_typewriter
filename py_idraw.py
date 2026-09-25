@@ -73,6 +73,12 @@ class IDraw:
     def move(self, x: float, y: float):
         self.send_gcode(f"G01 X{x} Y{y}")
 
+    def move_x(self, x: float):
+        self.send_gcode(f"G01 X{x}")
+
+    def move_y(self, y: float):
+        self.send_gcode(f"G01 Y{y}")
+
     def set_height(self, height: float):
         assert height >= 0
         assert height <= 10
