@@ -1,5 +1,6 @@
 from enum import Enum
 import serial
+import time
 
 BAUD_RATE = 115200  # Common rates: 115200 or 250000
 
@@ -28,7 +29,7 @@ class IDraw:
 
     def send_gcode(self, gcode: str):
         formatted = gcode
-        if not formatted.endswith('\n'):
+        if not formatted.endswith('\n') and not formatted.endswith('\r'):
             formatted = formatted + '\n'
         self.ser.write(formatted.encode('utf-8'))
         self.ser.flush()
@@ -43,6 +44,12 @@ class IDraw:
             if resp.startswith('busy'):
                 print(resp)
                 return
+
+    def go_home(self):
+        self.send_gcode("$H\r")
+
+    def wait_for_idle(self):
+        return
 
     def set_unit(self, unit: Unit):
         """
@@ -66,12 +73,15 @@ class IDraw:
 
     def set_speed(self, speed: float):
         assert speed >= 50
-        assert speed <= 2500
+        assert speed <= 5000
 
         self.send_gcode(f"F{speed}")
 
     def move(self, x: float, y: float):
         self.send_gcode(f"G01 X{x} Y{y}")
+
+    def quick_move(self, x: float, y: float):
+        self.send_gcode(f"G00 X{x} Y{y}")
 
     def move_x(self, x: float):
         self.send_gcode(f"G01 X{x}")
