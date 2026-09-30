@@ -100,8 +100,8 @@ def main(stdscr):
             continue
 
         if ascii == 24: # ctrl-x
-            #stdscr.addstr(typing_row + 1, 0, "Exiting...", curses.A_REVERSE)
-            #stdscr.refresh()
+            stdscr.addstr(min(typing_row + 1 - scroll_count, height - 1), 0, "Exiting...", curses.A_REVERSE)
+            stdscr.refresh()
             writing_service.stop_gracefully()
             break
 

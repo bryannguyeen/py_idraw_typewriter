@@ -1,6 +1,5 @@
 from collections import deque
 import threading
-import time
 from idraw_letter_drawer import Drawer
 
 class Service:
@@ -8,42 +7,45 @@ class Service:
 
     def __init__(self, on_started_processing, on_finished_processing):
         self.letter_queue = deque()
-        self.queue_mutex = threading.Lock()
-        self.queue_running_bool_mutex = threading.Lock()
+        self.thread_condition = threading.Condition()
 
         self.on_started_processing = on_started_processing
         self.on_finished_processing = on_finished_processing
-        self.thread_running = False
+
         self.stop_event = threading.Event()
-        self.thread = None
+        self.thread = threading.Thread(target = self.run_letter_processor)
+        self.thread.start()
 
         self.drawer = Drawer()
 
     def pop_next_letter(self):
-        with self.queue_mutex:
-            if len(self.letter_queue) == 0:
-                return None
+        try:
             return self.letter_queue.popleft()
+        except IndexError:
+            return None
 
     # returns true if queue was nonempty, false otherwise
     def remove_last(self):
-        with self.queue_mutex:
-            if len(self.letter_queue) > 0:
-                self.letter_queue.pop()
-                return True
+        try:
+            self.letter_queue.pop()
+            return True
+        except IndexError:
             return False
 
     def process_next_letter(self, char: str):
         self.drawer.draw(char)
 
     def run_letter_processor(self):
-        while not self.stop_event.is_set():
-            next = None
-            with self.queue_running_bool_mutex:
-                next = self.pop_next_letter()
-                if next == None:
-                    self.thread_running = False
+        while True:
+            with self.thread_condition:
+                self.thread_condition.wait_for(lambda: len(self.letter_queue) > 0 or self.stop_event.is_set())
+                if self.stop_event.is_set():
                     return
+
+                next = self.pop_next_letter()
+ 
+            if next == None:
+                continue
 
             # call passed in lambda to notify a letter was popped
             self.on_started_processing(next)
@@ -53,19 +55,16 @@ class Service:
     def enqueue(self, letter: str):
         assert len(letter) == 1
 
-        with self.queue_running_bool_mutex:
-            with self.queue_mutex:
-                self.letter_queue.append(letter)
-
-            if not self.thread_running and not self.stop_event.is_set():
-                self.thread_running = True
-                self.thread = threading.Thread(target = self.run_letter_processor)
-                self.thread.start()
+        with self.thread_condition:
+            self.letter_queue.append(letter)
+            self.thread_condition.notify()
 
     def stop_gracefully(self):
-        if self.thread != None and self.thread.is_alive():
+        with self.thread_condition:
             self.stop_event.set()
-            self.thread.join()
+            self.thread_condition.notify()
+
+        self.thread.join()
 
 
 
