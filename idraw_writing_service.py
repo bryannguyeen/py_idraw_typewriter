@@ -6,20 +6,17 @@ class Service:
     thread: threading.Thread
     drawer: Drawer
 
-    def __init__(self, drawer, on_started_processing, on_finished_processing):
+    def __init__(self, drawer):
+        self.drawer = drawer
+
         self.letter_queue = deque()
         self.thread_condition = threading.Condition()
-
-        self.on_started_processing = on_started_processing
-        self.on_finished_processing = on_finished_processing
 
         self.stop_event = threading.Event()
         self.thread = threading.Thread(target = self.run_letter_processor)
         self.thread.start()
 
-        self.drawer = drawer
-
-    def pop_next_letter(self):
+    def pop_next_task(self):
         try:
             return self.letter_queue.popleft()
         except IndexError:
@@ -43,21 +40,21 @@ class Service:
                 if self.stop_event.is_set():
                     return
 
-                next = self.pop_next_letter()
+                nextChar, callback_on_start, callback_on_finished = self.pop_next_task()
  
-            if next == None:
+            if nextChar == None:
                 continue
 
             # call passed in lambda to notify a letter was popped
-            self.on_started_processing(next)
-            self.process_next_letter(next)
-            self.on_finished_processing(next)
+            callback_on_start()
+            self.process_next_letter(nextChar)
+            callback_on_finished()
 
-    def enqueue(self, letter: str):
+    def enqueue(self, letter: str, callback_on_start, callback_on_finished):
         assert len(letter) == 1
 
         with self.thread_condition:
-            self.letter_queue.append(letter)
+            self.letter_queue.append((letter, callback_on_start, callback_on_finished))
             self.thread_condition.notify()
 
     def stop_gracefully(self):

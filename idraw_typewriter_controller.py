@@ -16,18 +16,6 @@ IGNORABLES = ["Ȣ"]
 
 SPECIAL_ASCIIS = [8, 10, 13, 24]
 
-screen_mutex = threading.Lock()
-
-process_row = 1
-process_column = 0
-
-typing_row = 1
-typing_column = 0
-
-scroll_count = 0
-
-line_lengths = [0]
-
 logging.basicConfig(filename="debug.log", level=logging.DEBUG) # in case of logging
 
 def find_device():
@@ -36,135 +24,154 @@ def find_device():
             return port.device
     return None
 
-def mark_text_to_in_progress(stdscr, overwrite):
-    global process_row
-    global process_column
-    global typing_row
-    global typing_column
+class CursesCanvas():
+    def __init__(self, stdscr, welcome_message: str):
+        self.stdscr = stdscr
+        self.typing_row = 1
+        self.typing_column = 0
+        self.scroll_count = 0
+        self.line_lengths = [0]
 
-    curses.init_pair(3, curses.COLOR_BLUE, curses.COLOR_BLACK)
-    PROCESSING_COLOR = curses.color_pair(3)
+        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
+        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
+        curses.init_pair(3, curses.COLOR_BLUE, curses.COLOR_BLACK)
 
-    # code to overwrite char to the colour yellow (signalling it's now in progress)
-    # don't increment the process cursor, because increment_process_progression
-    # will take of that
-    if process_row >= scroll_count:
-        with screen_mutex:
-            stdscr.addstr(process_row - scroll_count, process_column, overwrite, PROCESSING_COLOR)
+        self.UNPROCESSED_COLOR = curses.color_pair(1)
+        self.PROCESSING_COLOR = curses.color_pair(3)
+        self.PROCESSED_COLOR = curses.color_pair(2)
 
-            stdscr.move(typing_row - scroll_count, typing_column)
-            stdscr.refresh()
+        self.canvas_lock = threading.Lock() # this is for read/writes of typing_row, typing_column, scroll_count, and/or line_lengths
 
-# recolour next red letter to green, signifying it has been processed
-def increment_process_progression(stdscr, overwrite):
-    global process_row
-    global process_column
-    global typing_row
-    global typing_column
+        self.stdscr.scrollok(True)
+        with self.canvas_lock:
+            self.stdscr.clear()
+            self.stdscr.addstr(f"{welcome_message}\n", curses.A_REVERSE)
+            self.stdscr.refresh()
 
-    height, width = stdscr.getmaxyx()
+    def row_after_scroll(self, row: int):
+        return row - self.scroll_count
 
-    curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-    PROCESSED_COLOR = curses.color_pair(2)
+    # code to overwrite char at row/column position with the given colour
+    def write_char_with_colour(self, row: int, column: int, char: str, color):
+        assert len(char) == 1
 
-    # code to overwrite char to the colour green (signalling it's now processed)
-    # and then increments the process cursor
-    if overwrite == "\n":
-        process_row += 1
-        process_column = 0
-    else:
-        if process_row >= scroll_count: #render only text to overwrite is NOT offscreen
-            with screen_mutex:
-                stdscr.addstr(process_row - scroll_count, process_column, overwrite, PROCESSED_COLOR)
-                stdscr.move(typing_row - scroll_count, typing_column)
-                stdscr.refresh()
-        if process_column < width - 1:
-            process_column += 1
-        else :
-            process_row += 1
-            process_column = 0
+        if row < self.scroll_count:
+            return
+
+        with self.canvas_lock:
+            self.stdscr.addstr(self.row_after_scroll(row), column, char, color)
+
+            # move cursor back to current typing position
+            self.stdscr.move(self.typing_row - self.scroll_count, self.typing_column)
+            self.stdscr.refresh()
+
+
+    # recolour letter to green, signifying it has been processed
+    def mark_text_to_in_progress(self, row: int, column: int, char: str):
+        self.write_char_with_colour(row, column, char, self.PROCESSING_COLOR)
+
+    # recolour letter to green, signifying it has been processed
+    def mark_text_to_processed(self, row: int, column: int, char: str):
+        self.write_char_with_colour(row, column, char, self.PROCESSED_COLOR)
+
+    # writes the given char at the cursor and updates cursor position
+    # returns lambdas to call when updating status to in-progress, and processed
+    def type_char_at_cursor(self, char: str):
+        assert len(char) == 1
+
+        height, width = self.stdscr.getmaxyx()
+        with self.canvas_lock:
+            # insert the string, and calculate the next position for the typing cursor
+            if char != "\n":
+                row_written_to = self.typing_row
+                column_written_to = self.typing_column
+                if (self.typing_row >= self.scroll_count):
+                    self.stdscr.insstr(self.typing_row - self.scroll_count, self.typing_column, char, self.UNPROCESSED_COLOR)
+                self.typing_column += 1
+            if char == "\n" or self.typing_column >= width: # new line, simply move the cursor down and to the left. Force a new line if cursor has reached the end of the line.
+                # record the final length of this current line before moving to next line
+                self.line_lengths.insert(self.typing_row, min(self.typing_column, width - 1))
+
+                self.typing_row += 1
+                self.typing_column = 0
+
+                # if cursor is at the bottom, increment the scroll
+                if self.row_after_scroll(self.typing_row) >= height:
+                    scroll_amount = self.row_after_scroll(self.typing_row) - height + 1
+                    self.stdscr.scroll(scroll_amount)
+                    self.scroll_count += scroll_amount
+            self.stdscr.move(self.row_after_scroll(self.typing_row), self.typing_column)
+            self.stdscr.refresh()
+
+        if char.isspace(): # return lambdas that do nothing
+            return (lambda: None, lambda: None)
+
+        # otherwise, return lambdas that will update the colouring of the character
+        return (lambda: self.mark_text_to_in_progress(row_written_to, column_written_to, char), lambda: self.mark_text_to_processed(row_written_to, column_written_to, char))
+
+    # moves the cursor back one position and deletes the preceeding character
+    def backspace_from_cursor(self):
+        height, width = self.stdscr.getmaxyx()
+        with self.canvas_lock:
+            # find the previous cursor position
+            if self.typing_column > 0: # try to go to the left
+                self.typing_column -= 1
+            else: # if cursor is at the beginning of the line, try to go to rightmost side of previous line
+                if self.typing_row > 1:
+                    self.typing_row -= 1
+                    self.typing_column = min(self.line_lengths[self.typing_row], width - 1)
+                else: # if it's at the top left, do nothing
+                    return
+
+            # move to the previous position and delete character at position
+            self.stdscr.move(self.row_after_scroll(self.typing_row), self.typing_column)
+            self.stdscr.delch()
+            self.stdscr.refresh()
+
+    # this is a BLOCKING call because it waits for keyboard input
+    def get_char_in_ascii(self):
+        return self.stdscr.getch()
+
+    def print_exit_message(self):
+        height, width = self.stdscr.getmaxyx()
+
+        self.stdscr.addstr(min(self.row_after_scroll(self.typing_row) + 1, height - 1), 0, "Exiting...", curses.A_REVERSE)
+        self.stdscr.refresh()
 
 def main(stdscr):
     global IGNORABLES
-    global process_row
-    global process_column
-    global typing_row
-    global typing_column
-    global line_lengths
-    global scroll_count
-
-    curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-    UNPROCESSED_COLOR = curses.color_pair(1)
 
     port = find_device()
     if port == None:
         raise RuntimeError("Could not find a compatable IDraw device.")
     idraw = IDraw(port, 4)
-
     drawer = Drawer(idraw, HersheyFont("D:\\Downloads\\EMSReadability.svg", 5))
-    writing_service = Service(drawer, lambda letter: mark_text_to_in_progress(stdscr, letter), lambda letter: increment_process_progression(stdscr, letter))
+    writing_service = Service(drawer)
 
-    stdscr.scrollok(True);
-
-    stdscr.clear()
-    stdscr.addstr("Start typing :) ctrl-x to exit\n", curses.A_REVERSE)
-    stdscr.refresh()
+    canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")
 
     while True:
-        height, width = stdscr.getmaxyx()
+        ascii = canvas.get_char_in_ascii()
 
-        ascii = stdscr.getch()
-
+        # ignore input outside of normal typing range
         if ascii not in SPECIAL_ASCIIS and (ascii < 32 or ascii > 126):
             continue
 
         if ascii == 24: # ctrl-x
-            stdscr.addstr(min(typing_row + 1 - scroll_count, height - 1), 0, "Exiting...", curses.A_REVERSE)
-            stdscr.refresh()
+            canvas.print_exit_message()
             writing_service.stop_gracefully()
             break
 
-        char = chr(ascii)
-        write = ""
-
-        if char in ['\x7f', '\x08']: # Backspace
+        if ascii in [8, 127]: # Backspace
             if writing_service.remove_last(): # remove most recently queued item (cancellation)
-
-                with screen_mutex:
-                    # trying to move cursor to previous position
-                    if typing_column > 0: # try to go to the left
-                        typing_column -= 1
-                    else: # if cursor is at the beginning of the line, try to go to rightmost side of previous line
-                        if typing_row > 1:
-                            typing_row -= 1
-                            typing_column = line_lengths[typing_row]
-                        else: # if it's at the top left, do nothing
-                            continue
-
-                    stdscr.move(typing_row - scroll_count, typing_column)
-                    stdscr.delch()
-            continue
-        elif char not in IGNORABLES:
-            writing_service.enqueue(char)
-            write = char
-        else:
+                canvas.backspace_from_cursor()
             continue
 
-        with screen_mutex:
-            if write != "\n":
-                if (typing_row >= scroll_count):
-                    stdscr.insstr(typing_row - scroll_count, typing_column, write, UNPROCESSED_COLOR)
-                typing_column += 1
-            if write == "\n" or typing_column >= width: # new line, simply move the cursor to the next position, force a new line if cursor is reaching the right end
-                # new line, record the final length of this current line before moving to next line
-                line_lengths.insert(typing_row, min(typing_column, width - 1))
-                typing_row += 1
-                typing_column = 0
-                
-                if typing_row - scroll_count >= height: # if cursor is at the bottom, scroll
-                    stdscr.scroll(1)
-                    scroll_count += 1
-            stdscr.move(typing_row - scroll_count, typing_column)
-            stdscr.refresh()
+        char = chr(ascii)
+        if char in IGNORABLES:
+            continue
+
+        callback_on_processing, callback_on_finished = canvas.type_char_at_cursor(char)
+        writing_service.enqueue(char, callback_on_processing, callback_on_finished)
 
 wrapper(main)
