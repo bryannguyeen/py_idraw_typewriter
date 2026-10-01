@@ -1,22 +1,12 @@
 from hershey_font import HersheyFont
-from py_idraw import IDraw, Unit, CoordinateMode
-import serial.tools.list_ports
+from py_idraw import IDraw
 import time
 
-IDRAW_VID = 0x1A86
-IDRAW_PID = 0x8040
-
-def find_device():
-    for port in serial.tools.list_ports.comports():
-        if port.vid == IDRAW_VID and port.pid == IDRAW_PID:
-            return port.device
-    return None
-
 class Drawer:
-    def __init__(self):
-        self.font = HersheyFont("D:\\Downloads\\EMSReadability.svg", 5)
-        self.speed_mm_per_min = 1000.0
-        self.idraw = IDraw(find_device(), 4, self.speed_mm_per_min)
+    def __init__(self, idraw: IDraw, font: HersheyFont, port = None):
+        self.font = font
+        self.idraw = idraw
+
         self.current_pos = complex(0, 0)
 
     # return the deltax deltay for the next position
@@ -58,7 +48,7 @@ class Drawer:
 
         length = float(glyph.path.length())
         if length != None and length > 1:
-            estimated_drawing_time = (length / self.speed_mm_per_min) * 60.0 - elapsed_time
+            estimated_drawing_time = (length / self.idraw.current_speed) * 60.0 - elapsed_time
             if (estimated_drawing_time > 0):
                 time.sleep(estimated_drawing_time)
 

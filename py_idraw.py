@@ -14,7 +14,7 @@ class CoordinateMode(Enum):
 
 class IDraw:
 
-    def __init__(self, port, pen_down_height: float = 2, default_speed: float = 2000, unit: Unit = Unit.MILLIMETER):
+    def __init__(self, port, pen_down_height: float = 2, default_speed: float = 1000, unit: Unit = Unit.MILLIMETER):
         assert pen_down_height >= 1
 
         self.ser = serial.Serial(port, BAUD_RATE, timeout=2)

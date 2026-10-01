@@ -4,8 +4,9 @@ from idraw_letter_drawer import Drawer
 
 class Service:
     thread: threading.Thread
+    drawer: Drawer
 
-    def __init__(self, on_started_processing, on_finished_processing):
+    def __init__(self, drawer, on_started_processing, on_finished_processing):
         self.letter_queue = deque()
         self.thread_condition = threading.Condition()
 
@@ -16,7 +17,7 @@ class Service:
         self.thread = threading.Thread(target = self.run_letter_processor)
         self.thread.start()
 
-        self.drawer = Drawer()
+        self.drawer = drawer
 
     def pop_next_letter(self):
         try:
