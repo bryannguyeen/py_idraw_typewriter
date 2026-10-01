@@ -23,12 +23,14 @@ class Drawer:
             if (len(subpath) == 0):
                 continue
 
+            # go to starting position and lower pen
             translated_subpath = subpath.translated(offset)
             starting_pos = translated_subpath[0].start
             self.idraw.quick_move(starting_pos.real, starting_pos.imag)
             self.idraw.lower_pen()
 
-            # path is continuous, so the end of the previous segment is the start of the next segment
+            # a subpath is continuous, so the end of each previous segment is the start of the next segment
+            # i.e. no need to lift the pen for continuous lines
             for segment in translated_subpath:
                 segment_type = type(segment).__name__
 
@@ -43,11 +45,16 @@ class Drawer:
                             dest_pos = segment.point(float(t) / float(samples))
                             self.idraw.mov(dest_pos.real, dest_pos.imag)
                         next
+            
+            # raise the pen to go to the next subpath
             self.idraw.raise_pen()
         elapsed_time =  time.monotonic() - start_time
 
         length = float(glyph.path.length())
         if length != None and length > 1:
+
+            # subtract the estimated drawing time with time it took to calculate translated coordinates and send gcode
+            # to get the remaining estimated time
             estimated_drawing_time = (length / self.idraw.current_speed) * 60.0 - elapsed_time
             if (estimated_drawing_time > 0):
                 time.sleep(estimated_drawing_time)
@@ -59,3 +66,9 @@ class Drawer:
     def draw(self, char: str):
         assert len(char) == 1
         self.current_pos += self.draw_internal(char, self.current_pos)
+
+    def exit(self):
+        self.idraw.quick_move(0.0, 0.0)
+
+    def wait_position(self):
+        self.idraw.quick_move(self.current_pos.real, self.current_pos.imag)

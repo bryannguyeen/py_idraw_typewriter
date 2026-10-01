@@ -14,7 +14,7 @@ IDRAW_PID = 0x8040
 
 IGNORABLES = ["Ȣ"]
 
-SPECIAL_ASCIIS = [8, 10, 13, 24]
+SPECIAL_ASCIIS = [8, 10, 13, 24, 127]
 
 logging.basicConfig(filename="debug.log", level=logging.DEBUG) # in case of logging
 
@@ -144,7 +144,7 @@ def main(stdscr):
     port = find_device()
     if port == None:
         raise RuntimeError("Could not find a compatable IDraw device.")
-    idraw = IDraw(port, 4)
+    idraw = IDraw(port, 4, 2000)
     drawer = Drawer(idraw, HersheyFont("D:\\Downloads\\EMSReadability.svg", 5))
     writing_service = Service(drawer)
 

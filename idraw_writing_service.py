@@ -33,10 +33,13 @@ class Service:
     def process_next_letter(self, char: str):
         self.drawer.draw(char)
 
+    def queue_has_tasks(self):
+        return len(self.letter_queue) > 0
+
     def run_letter_processor(self):
         while True:
             with self.thread_condition:
-                self.thread_condition.wait_for(lambda: len(self.letter_queue) > 0 or self.stop_event.is_set())
+                self.thread_condition.wait_for(lambda: self.queue_has_tasks() or self.stop_event.is_set())
                 if self.stop_event.is_set():
                     return
 
@@ -50,6 +53,9 @@ class Service:
             self.process_next_letter(nextChar)
             callback_on_finished()
 
+            if not self.queue_has_tasks():
+                self.drawer.wait_position()
+
     def enqueue(self, letter: str, callback_on_start, callback_on_finished):
         assert len(letter) == 1
 
@@ -61,6 +67,8 @@ class Service:
         with self.thread_condition:
             self.stop_event.set()
             self.thread_condition.notify()
+
+        self.drawer.exit()
 
         self.thread.join()
 
