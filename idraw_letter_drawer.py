@@ -15,7 +15,7 @@ class Drawer:
 
         # newline sets to position to lower line, leftmost
         if char == "\n":
-            return complex(-offset.real, -self.font.height)
+            return complex(-offset.real, -self.font.body_height * 1.1)
 
         glyph = self.font.get_or_default(char)
         start_time = time.monotonic()
