@@ -1,4 +1,5 @@
 import xml.etree.ElementTree as ET
+from pathlib import Path as FilePath
 from svgpathtools import parse_path, Path
 
 class SVGPathCommand:
@@ -25,8 +26,11 @@ class HersheyFont:
     glyphs: dict[str, Glyph]
     default_glyph: Glyph
     body_height: float
+    name: str
 
     def __init__(self, file_path):
+        self.name = FilePath(file_path).stem
+
         tree = ET.parse(file_path)
         root = tree.getroot()
 

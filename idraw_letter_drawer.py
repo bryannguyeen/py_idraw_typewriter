@@ -8,24 +8,45 @@ logging.basicConfig(filename="debug.log", level=logging.DEBUG)
 class Drawer:
     font_size: float
 
-    def __init__(self, idraw: IDraw, font: HersheyFont, font_size = 32):
+    def __init__(self, idraw: IDraw, font: HersheyFont, font_size = 16):
+        assert font_size > 0
+
         self.font = font
         self.idraw = idraw
         self.font_size = font_size
 
         self.current_pos = complex(0, 0)
+        self.is_in_line_beginning = True
+
+    def set_font_size(self, font_size: float):
+        assert font_size > 0
+
+        # Adjust baseline positioning to the new font size only if plotter is at the beginning of a line.
+        # We don't want to adjust it in the middle of a line, because then the character's height position
+        # will be inconsistent with the characters behind it.
+        if self.is_in_line_beginning:
+            old_scale = self.font_size_in_mm() / self.font.body_height
+            new_scale = self.pt_to_mm(font_size) / self.font.body_height
+            new_baseline_diference = self.font.body_height * old_scale * 1.1 - self.font.body_height * new_scale * 1.1
+            self.current_pos += complex(0, new_baseline_diference)
+
+        self.font_size = font_size
+
+    def pt_to_mm(self, pt: float):
+        return pt / 72.0 * 25.4 # convert pt to inches, then mm
 
     def font_size_in_mm(self):
-        return self.font_size / 72.0 * 25.4 # convert pt to inches, then mm
+        return self.pt_to_mm(self.font_size)
 
     # return the deltax deltay for the next position
-    def draw_internal(self, char: str, offset: complex = 0):
+    def draw_internal(self, char: str, offset: complex = 0) -> complex:
         assert len(char) == 1
 
         scale = self.font_size_in_mm() / self.font.body_height
 
         # newline sets to position to lower line, leftmost
         if char == "\n":
+            self.is_in_line_beginning = True
             return complex(-offset.real, -self.font.body_height * scale * 1.1)
 
         start_time = time.monotonic()
@@ -55,7 +76,7 @@ class Drawer:
                         samples = 4
                         for t in range(1, samples + 1):
                             dest_pos = segment.point(float(t) / float(samples))
-                            self.idraw.mov(dest_pos.real, dest_pos.imag)
+                            self.idraw.move(dest_pos.real, dest_pos.imag)
                         next
             
             # raise the pen to go to the next subpath
@@ -71,6 +92,7 @@ class Drawer:
             if (estimated_drawing_time > 0):
                 time.sleep(estimated_drawing_time)
 
+        self.is_in_line_beginning = False
 
         # return x and y advancement
         return complex(glyph.width * scale, 0)

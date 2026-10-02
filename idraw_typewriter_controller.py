@@ -1,7 +1,7 @@
 from collections import deque
 import curses
 from curses import wrapper
-from idraw_writing_service import Service
+from idraw_writing_service import Service, WriteTask, SetFontSizeTask
 import threading
 import logging
 from idraw_letter_drawer import Drawer
@@ -14,7 +14,7 @@ IDRAW_PID = 0x8040
 
 IGNORABLES = ["Ȣ"]
 
-SPECIAL_ASCIIS = [8, 10, 13, 24, 127]
+SPECIAL_ASCIIS = [8, 10, 13, 24, 127, curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]
 
 logging.basicConfig(filename="debug.log", level=logging.DEBUG) # in case of logging
 
@@ -23,6 +23,17 @@ def find_device():
         if port.vid == IDRAW_VID and port.pid == IDRAW_PID:
             return port.device
     return None
+
+class Status:
+    font: HersheyFont
+    font_size: float
+
+    def __init__(self, font, font_size):
+        self.font = font
+        self.font_size = font_size
+
+    def to_string(self):
+        return f"font: {self.font.name}    font size: {self.font_size}"
 
 class CursesCanvas():
     def __init__(self, stdscr, welcome_message: str):
@@ -43,6 +54,11 @@ class CursesCanvas():
         self.canvas_lock = threading.Lock() # this is for read/writes of typing_row, typing_column, scroll_count, and/or line_lengths
 
         self.stdscr.scrollok(True)
+        height, width = self.stdscr.getmaxyx()
+        stdscr.setscrreg(0, height - 2) # to set every row except the bottom row scrollable
+
+        self.stdscr.keypad(True)
+
         with self.canvas_lock:
             self.stdscr.clear()
             self.stdscr.addstr(f"{welcome_message}\n", curses.A_REVERSE)
@@ -64,7 +80,6 @@ class CursesCanvas():
             # move cursor back to current typing position
             self.stdscr.move(self.typing_row - self.scroll_count, self.typing_column)
             self.stdscr.refresh()
-
 
     # recolour letter to green, signifying it has been processed
     def mark_text_to_in_progress(self, row: int, column: int, char: str):
@@ -96,15 +111,15 @@ class CursesCanvas():
                 self.typing_column = 0
 
                 # if cursor is at the bottom, increment the scroll
-                if self.row_after_scroll(self.typing_row) >= height:
-                    scroll_amount = self.row_after_scroll(self.typing_row) - height + 1
+                if self.row_after_scroll(self.typing_row) >= height - 1:
+                    scroll_amount = self.row_after_scroll(self.typing_row) - height + 2
                     self.stdscr.scroll(scroll_amount)
                     self.scroll_count += scroll_amount
             self.stdscr.move(self.row_after_scroll(self.typing_row), self.typing_column)
             self.stdscr.refresh()
 
         if char.isspace(): # return lambdas that do nothing
-            return (lambda: None, lambda: None)
+            return (None, None)
 
         # otherwise, return lambdas that will update the colouring of the character
         return (lambda: self.mark_text_to_in_progress(row_written_to, column_written_to, char), lambda: self.mark_text_to_processed(row_written_to, column_written_to, char))
@@ -130,25 +145,52 @@ class CursesCanvas():
 
     # this is a BLOCKING call because it waits for keyboard input
     def get_char_in_ascii(self):
+        self.stdscr.keypad(True)
         return self.stdscr.getch()
+
+    # redraw status
+    def update_status_bar(self, status: str):
+        with self.canvas_lock:
+            height, width = self.stdscr.getmaxyx()
+
+            row_to_write_at = height - 1
+
+            # clear text in row
+            self.stdscr.move(row_to_write_at, 0)
+            self.stdscr.clrtoeol()
+
+            self.stdscr.addstr(status, curses.A_REVERSE)
+
+            # move cursor back to current typing position
+            self.stdscr.move(self.typing_row - self.scroll_count, self.typing_column)
+            self.stdscr.refresh()
 
     def print_exit_message(self):
         height, width = self.stdscr.getmaxyx()
 
-        self.stdscr.addstr(min(self.row_after_scroll(self.typing_row) + 1, height - 1), 0, "Exiting...", curses.A_REVERSE)
+        row_to_write_at = min(self.row_after_scroll(self.typing_row) + 1, height - 1)
+
+        # clear text in row
+        self.stdscr.move(row_to_write_at, 0)
+        self.stdscr.clrtoeol()
+
+        self.stdscr.addstr("Exiting...", curses.A_REVERSE)
         self.stdscr.refresh()
 
 def main(stdscr):
     global IGNORABLES
 
+    status = Status(font = HersheyFont("D:\\Downloads\\EMSReadability.svg"), font_size = 16.0)
+
     port = find_device()
     if port == None:
         raise RuntimeError("Could not find a compatable IDraw device.")
     idraw = IDraw(port, 4, 2000)
-    drawer = Drawer(idraw, HersheyFont("D:\\Downloads\\EMSReadability.svg"))
+    drawer = Drawer(idraw, status.font, status.font_size)
     writing_service = Service(drawer)
 
     canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")
+    canvas.update_status_bar(status.to_string())
 
     while True:
         ascii = canvas.get_char_in_ascii()
@@ -167,11 +209,26 @@ def main(stdscr):
                 canvas.backspace_from_cursor()
             continue
 
+        if ascii == curses.KEY_UP:
+            status.font_size += 1.0
+            callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↑")
+            writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
+            canvas.update_status_bar(status.to_string())
+            continue
+
+        if ascii == curses.KEY_DOWN:
+            if status.font_size >= 9.0:
+                status.font_size -= 1.0
+                callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↓")
+                writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
+                canvas.update_status_bar(status.to_string())
+            continue
+
         char = chr(ascii)
         if char in IGNORABLES:
             continue
 
-        callback_on_processing, callback_on_finished = canvas.type_char_at_cursor(char)
-        writing_service.enqueue(char, callback_on_processing, callback_on_finished)
+        callback_on_started, callback_on_finished = canvas.type_char_at_cursor(char)
+        writing_service.enqueue(WriteTask(char, callback_on_started, callback_on_finished))
 
 wrapper(main)
