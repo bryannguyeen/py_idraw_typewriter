@@ -145,7 +145,7 @@ def main(stdscr):
     if port == None:
         raise RuntimeError("Could not find a compatable IDraw device.")
     idraw = IDraw(port, 4, 2000)
-    drawer = Drawer(idraw, HersheyFont("D:\\Downloads\\EMSReadability.svg", 5))
+    drawer = Drawer(idraw, HersheyFont("D:\\Downloads\\EMSReadability.svg"))
     writing_service = Service(drawer)
 
     canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")

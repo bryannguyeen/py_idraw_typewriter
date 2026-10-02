@@ -1,37 +1,49 @@
 from hershey_font import HersheyFont
 from py_idraw import IDraw
 import time
+import logging
+
+logging.basicConfig(filename="debug.log", level=logging.DEBUG)
 
 class Drawer:
-    def __init__(self, idraw: IDraw, font: HersheyFont, port = None):
+    font_size: float
+
+    def __init__(self, idraw: IDraw, font: HersheyFont, font_size = 32):
         self.font = font
         self.idraw = idraw
+        self.font_size = font_size
 
         self.current_pos = complex(0, 0)
+
+    def font_size_in_mm(self):
+        return self.font_size / 72.0 * 25.4 # convert pt to inches, then mm
 
     # return the deltax deltay for the next position
     def draw_internal(self, char: str, offset: complex = 0):
         assert len(char) == 1
 
+        scale = self.font_size_in_mm() / self.font.body_height
+
         # newline sets to position to lower line, leftmost
         if char == "\n":
-            return complex(-offset.real, -self.font.body_height * 1.1)
+            return complex(-offset.real, -self.font.body_height * scale * 1.1)
+
+        start_time = time.monotonic()
 
         glyph = self.font.get_or_default(char)
-        start_time = time.monotonic()
         for subpath in glyph.path.continuous_subpaths():
             if (len(subpath) == 0):
                 continue
 
             # go to starting position and lower pen
-            translated_subpath = subpath.translated(offset)
-            starting_pos = translated_subpath[0].start
+            transformed_subpath = subpath.scaled(scale).translated(offset)
+            starting_pos = transformed_subpath[0].start
             self.idraw.quick_move(starting_pos.real, starting_pos.imag)
             self.idraw.lower_pen()
 
             # a subpath is continuous, so the end of each previous segment is the start of the next segment
             # i.e. no need to lift the pen for continuous lines
-            for segment in translated_subpath:
+            for segment in transformed_subpath:
                 segment_type = type(segment).__name__
 
                 match segment_type:
@@ -50,7 +62,7 @@ class Drawer:
             self.idraw.raise_pen()
         elapsed_time =  time.monotonic() - start_time
 
-        length = float(glyph.path.length())
+        length = float(glyph.path.length()) * scale
         if length != None and length > 1:
 
             # subtract the estimated drawing time with time it took to calculate translated coordinates and send gcode
@@ -61,7 +73,7 @@ class Drawer:
 
 
         # return x and y advancement
-        return complex(glyph.width, 0)
+        return complex(glyph.width * scale, 0)
 
     def draw(self, char: str):
         assert len(char) == 1
