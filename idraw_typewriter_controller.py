@@ -33,7 +33,7 @@ class Status:
         self.font_size = font_size
 
     def to_string(self):
-        return f"font: {self.font.name}    font size: {self.font_size}"
+        return f"font: {self.font.name}    font size: {self.font_size} pt"
 
 class CursesCanvas():
     def __init__(self, stdscr, welcome_message: str):
