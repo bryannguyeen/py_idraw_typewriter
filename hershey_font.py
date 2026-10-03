@@ -27,8 +27,11 @@ class HersheyFont:
     default_glyph: Glyph
     body_height: float
     name: str
+    file_name: str
 
     def __init__(self, file_path):
+
+        self.file_name = FilePath(file_path).name
 
         tree = ET.parse(file_path)
         root = tree.getroot()

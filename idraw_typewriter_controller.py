@@ -1,4 +1,3 @@
-from collections import deque
 import curses
 from curses import wrapper
 from idraw_writing_service import Service, WriteTask, SetFontSizeTask
@@ -8,13 +7,16 @@ from idraw_letter_drawer import Drawer
 from hershey_font import HersheyFont
 from py_idraw import IDraw
 import serial.tools.list_ports
+import configparser
+from pathlib import Path
 
 IDRAW_VID = 0x1A86
 IDRAW_PID = 0x8040
 
 IGNORABLES = ["Ȣ"]
 
-SPECIAL_ASCIIS = [8, 10, 13, 24, 127, curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]
+SPECIAL_ASCIIS = [1, 8, 10, 13, 24, 127, curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]
+CONFIG_PATH = "./config.ini"
 
 logging.basicConfig(filename="debug.log", level=logging.DEBUG) # in case of logging
 
@@ -24,16 +26,12 @@ def find_device():
             return port.device
     return None
 
-class Status:
-    font: HersheyFont
-    font_size: float
+def truncate_string(string: str, max_length: int) -> str:
+    assert max_length > 3
+    if len(string) <= max_length:
+        return string
 
-    def __init__(self, font, font_size):
-        self.font = font
-        self.font_size = font_size
-
-    def to_string(self):
-        return f"font: {self.font.name}    font size: {self.font_size} pt"
+    return string[:(max_length - 3)] + "..."
 
 class CursesCanvas():
     def __init__(self, stdscr, welcome_message: str):
@@ -63,6 +61,63 @@ class CursesCanvas():
             self.stdscr.clear()
             self.stdscr.addstr(f"{welcome_message}\n", curses.A_REVERSE)
             self.stdscr.refresh()
+
+    def list_selector(self, prompt_message: str, items: list[str], previous_selection = None) -> str:
+        assert len(items) > 0
+
+        # hide cursor
+        curses.curs_set(0)
+
+        selected_index = 0
+        scroll_distance = 0
+
+        self.stdscr.touchwin()
+        self.stdscr.refresh()
+
+        height, width = self.stdscr.getmaxyx()
+        list_pad = curses.newpad(max(len(items), height - 1), 1000)
+        self.stdscr.refresh()
+
+        previous_bottom_text = self.get_bottom_text_bar_as_string()
+        self.update_bottom_text_bar(prompt_message)
+
+        for index, item in enumerate(items):
+            list_pad.addstr(index, 0, truncate_string(item, width))
+            if previous_selection == item:
+                selected_index = index
+        list_pad.chgat(selected_index, 0, -1, self.PROCESSED_COLOR)
+        
+        list_pad.refresh(0, 0, 0, 0, height-2, width-1)
+
+        while True:
+            ascii = self.get_char_in_ascii()
+            if ascii == 13 or ascii == 10: # Enter key
+                break
+
+            new_selected_index = None
+            if ascii == curses.KEY_DOWN and selected_index < len(items) - 1:
+                new_selected_index = selected_index + 1
+                if (new_selected_index < len(items) - 1) and (new_selected_index - scroll_distance > height - 3):
+                    scroll_distance += 1
+            elif ascii == curses.KEY_UP and selected_index > 0:
+                new_selected_index = selected_index - 1
+                if (new_selected_index > 0) and (new_selected_index - scroll_distance < 1):
+                    scroll_distance -= 1
+            if new_selected_index != None:
+                list_pad.chgat(selected_index, 0, -1, curses.A_NORMAL)
+                list_pad.chgat(new_selected_index, 0, -1, self.PROCESSED_COLOR)
+                selected_index = new_selected_index
+
+                list_pad.refresh(scroll_distance, 0, 0, 0, height-2, width-1)
+
+        # remove pad and return to before
+        del list_pad
+        curses.curs_set(1)
+        self.stdscr.touchwin()
+        self.stdscr.refresh()
+        self.update_bottom_text_bar(previous_bottom_text)
+
+        return items[selected_index]
 
     def row_after_scroll(self, row: int):
         return row - self.scroll_count
@@ -149,7 +204,7 @@ class CursesCanvas():
         return self.stdscr.getch()
 
     # redraw status
-    def update_status_bar(self, status: str):
+    def update_bottom_text_bar(self, status: str):
         with self.canvas_lock:
             height, width = self.stdscr.getmaxyx()
 
@@ -158,12 +213,20 @@ class CursesCanvas():
             # clear text in row
             self.stdscr.move(row_to_write_at, 0)
             self.stdscr.clrtoeol()
+            self.stdscr.chgat(row_to_write_at, 0, -1, curses.A_REVERSE)
 
             self.stdscr.addstr(status, curses.A_REVERSE)
 
             # move cursor back to current typing position
             self.stdscr.move(self.typing_row - self.scroll_count, self.typing_column)
             self.stdscr.refresh()
+
+    def get_bottom_text_bar_as_string(self):
+        height, width = self.stdscr.getmaxyx()
+
+        status_bar_row = height - 1
+        bytes = self.stdscr.instr(status_bar_row, 0)
+        return bytes.decode("utf-8").rstrip()
 
     def print_exit_message(self):
         height, width = self.stdscr.getmaxyx()
@@ -177,10 +240,74 @@ class CursesCanvas():
         self.stdscr.addstr("Exiting...", curses.A_REVERSE)
         self.stdscr.refresh()
 
+def get_hershey_font_or_return_none(file_path: str) -> HersheyFont:
+    if not file_path.strip():
+        return None
+    try:
+        return HersheyFont(file_path)
+    except Exception:
+        return None
+
+class Status:
+    font: HersheyFont
+    font_size: float
+    font_dir_name: str
+    available_fonts: list[str]
+
+    def __init__(self, font_size, config_file_name):
+        self.font_size = font_size
+
+        # load config
+        self.config = configparser.ConfigParser()
+        self.config.read(CONFIG_PATH)
+        self.set_available_fonts_from_config()
+
+    def set_available_fonts_from_config(self):
+            self.font_dir_name = self.config.get("settings", "font_directory", fallback = "./fonts")
+            font_dir = Path(self.font_dir_name)
+            self.available_fonts = list()
+            for item in font_dir.iterdir():
+                if item.is_file() and item.name.lower().endswith(".svg"):
+                    self.available_fonts.append(item.name)
+            if len(self.available_fonts) == 0:
+                raise RuntimeError("No font found")
+
+    def load_recent_font_or_prompt_user(self, canvas):
+        recent_font = self.config.get("settings", "recently_used_font", fallback = "")
+
+        self.font = get_hershey_font_or_return_none(recent_font)
+        if self.font: # if recent font is loaded successfully, do nothing more
+            return
+
+        # else, prompt user to make a selection
+        self.prompt_user_to_select_font(canvas)
+
+
+    def prompt_user_to_select_font(self, canvas):
+        font_selection = canvas.list_selector(prompt_message = "Pick a font", items = self.available_fonts,
+                                              previous_selection = self.font.file_name if self.font else None)
+        font_file_to_use = "/".join([self.font_dir_name, font_selection])
+
+        # save recently used font
+        if not self.config.has_section("settings"):
+            self.config.add_section("settings")
+        self.config.set("settings", "recently_used_font", font_file_to_use)
+    
+        with open(CONFIG_PATH, "w") as f:
+            self.config.write(f)
+
+        self.font = HersheyFont(font_file_to_use)
+
+    def to_string(self):
+        return f"font: {self.font.name}    font size: {self.font_size} pt"
+
 def main(stdscr):
     global IGNORABLES
 
-    status = Status(font = HersheyFont("D:\\Downloads\\EMSReadability.svg"), font_size = 16.0)
+    canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")
+
+    status = Status(font_size = 16.0, config_file_name = CONFIG_PATH)
+    status.load_recent_font_or_prompt_user(canvas)
 
     port = find_device()
     if port == None:
@@ -189,8 +316,7 @@ def main(stdscr):
     drawer = Drawer(idraw, status.font, status.font_size)
     writing_service = Service(drawer)
 
-    canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")
-    canvas.update_status_bar(status.to_string())
+    canvas.update_bottom_text_bar(status.to_string())
 
     while True:
         ascii = canvas.get_char_in_ascii()
@@ -209,11 +335,25 @@ def main(stdscr):
                 canvas.backspace_from_cursor()
             continue
 
+        if ascii == 1: # ctrl-a: switch fonts
+            if writing_service.is_idle(): # only switch fonts when idle
+                status.prompt_user_to_select_font(canvas)
+
+                # update drawer's font and status bar
+
+                # todo: consider making this a task that can only be sent when idle, so writing_service can call wait_position and not the controller
+                drawer.set_font(status.font)
+                drawer.wait_position
+
+                canvas.update_bottom_text_bar(status.to_string())
+
+            continue
+
         if ascii == curses.KEY_UP:
             status.font_size += 1.0
             callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↑")
             writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
-            canvas.update_status_bar(status.to_string())
+            canvas.update_bottom_text_bar(status.to_string())
             continue
 
         if ascii == curses.KEY_DOWN:
@@ -221,7 +361,7 @@ def main(stdscr):
                 status.font_size -= 1.0
                 callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↓")
                 writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
-                canvas.update_status_bar(status.to_string())
+                canvas.update_bottom_text_bar(status.to_string())
             continue
 
         char = chr(ascii)

@@ -27,10 +27,18 @@ class Drawer:
         if self.is_in_line_beginning:
             old_scale = self.font_size_in_mm() / self.font.body_height
             new_scale = self.pt_to_mm(font_size) / self.font.body_height
-            new_baseline_diference = self.font.body_height * old_scale * 1.1 - self.font.body_height * new_scale * 1.1
-            self.current_pos += complex(0, new_baseline_diference)
+            new_baseline_difference = self.font.body_height * old_scale * 1.1 - self.font.body_height * new_scale * 1.1
+            self.current_pos += complex(0, new_baseline_difference)
 
         self.font_size = font_size
+
+    def set_font(self, font: HersheyFont):
+        if self.is_in_line_beginning:
+            scale = self.font_size_in_mm() / self.font.body_height
+            new_baseline_difference = self.font.body_height * scale * 1.1 - font.body_height * scale * 1.1
+            self.current_pos += complex(0, new_baseline_difference)
+
+        self.font = font
 
     def pt_to_mm(self, pt: float):
         return pt / 72.0 * 25.4 # convert pt to inches, then mm

@@ -41,6 +41,7 @@ class SetFontSizeTask(Task):
 class Service:
     thread: threading.Thread
     drawer: Drawer
+    thread_idle: bool
 
     def __init__(self, drawer):
         self.drawer = drawer
@@ -49,8 +50,12 @@ class Service:
         self.thread_condition = threading.Condition()
 
         self.stop_event = threading.Event()
+        self.thread_idle = False
         self.thread = threading.Thread(target = self.run_letter_processor)
         self.thread.start()
+
+    def is_idle(self):
+        return self.thread_idle
 
     def pop_next_task(self):
         try:
@@ -88,10 +93,12 @@ class Service:
     def run_letter_processor(self):
         while True:
             with self.thread_condition:
+                if not self.queue_has_tasks():
+                    self.thread_idle = True
                 self.thread_condition.wait_for(lambda: self.queue_has_tasks() or self.stop_event.is_set())
                 if self.stop_event.is_set():
                     return
-
+                self.thread_idle = False
                 task = self.pop_next_task()
  
             if task == None:
