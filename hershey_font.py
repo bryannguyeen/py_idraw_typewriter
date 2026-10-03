@@ -29,12 +29,24 @@ class HersheyFont:
     name: str
 
     def __init__(self, file_path):
-        self.name = FilePath(file_path).stem
 
         tree = ET.parse(file_path)
         root = tree.getroot()
 
         ns = {"svg": "http://www.w3.org/2000/svg"}
+
+        # get name from metadata tag
+        font_name = None
+        font_metadata = root.find(".//svg:metadata", ns)
+        for line in font_metadata.text.splitlines():
+            if line.startswith("Font name:"):
+                font_name = line.split(":")[1].strip()
+                break
+
+        if font_name:
+            self.name = font_name
+        else: # fall back to using the font's file name
+            self.name = FilePath(file_path).stem
 
         font_face = root.find(".//svg:font-face", ns)
         ascent = float(font_face.get("ascent"))
