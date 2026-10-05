@@ -1,6 +1,5 @@
 from enum import Enum
 import serial
-import time
 
 BAUD_RATE = 115200  # Common rates: 115200 or 250000
 
