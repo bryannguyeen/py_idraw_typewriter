@@ -1,6 +1,6 @@
 import curses
 from curses import wrapper
-from idraw_writing_service import Service, WriteTask, SetFontSizeTask
+from idraw_writing_service import Service, WriteTask, SetFontSizeTask, SetFontTask
 import threading
 import logging
 from idraw_letter_drawer import Drawer
@@ -17,6 +17,9 @@ IGNORABLES = ["Ȣ"]
 
 SPECIAL_ASCIIS = [1, 8, 10, 13, 24, 127, curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]
 CONFIG_PATH = "./config.ini"
+
+MIN_FONT_SIZE = 8.0
+MAX_FONT_SIZE = 500.0
 
 logging.basicConfig(filename="debug.log", level=logging.DEBUG) # in case of logging
 
@@ -302,8 +305,6 @@ class Status:
         return f"font: {self.font.name}    font size: {self.font_size} pt"
 
 def main(stdscr):
-    global IGNORABLES
-
     canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")
 
     status = Status(font_size = 16.0, config_file_name = CONFIG_PATH)
@@ -340,25 +341,22 @@ def main(stdscr):
                 status.prompt_user_to_select_font(canvas)
 
                 # update drawer's font and status bar
-
-                # todo: consider making this a task that can only be sent when idle, so writing_service can call wait_position and not the controller
-                drawer.set_font(status.font)
-                drawer.wait_position
-
+                writing_service.enqueue(SetFontTask(status.font, callback_on_started, callback_on_finished))
                 canvas.update_bottom_text_bar(status.to_string())
 
             continue
 
         if ascii == curses.KEY_UP:
-            status.font_size += 1.0
-            callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↑")
-            writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
-            canvas.update_bottom_text_bar(status.to_string())
+            if status.font_size < MAX_FONT_SIZE:
+                status.font_size = min(status.font_size + 1.0, MAX_FONT_SIZE)
+                callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↑")
+                writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
+                canvas.update_bottom_text_bar(status.to_string())
             continue
 
         if ascii == curses.KEY_DOWN:
-            if status.font_size >= 9.0:
-                status.font_size -= 1.0
+            if status.font_size > MIN_FONT_SIZE:
+                status.font_size = max(status.font_size - 1.0, MIN_FONT_SIZE)
                 callback_on_started, callback_on_finished = canvas.type_char_at_cursor("↓")
                 writing_service.enqueue(SetFontSizeTask(status.font_size, callback_on_started, callback_on_finished))
                 canvas.update_bottom_text_bar(status.to_string())
