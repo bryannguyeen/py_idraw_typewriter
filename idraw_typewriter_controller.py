@@ -9,6 +9,7 @@ from py_idraw import IDraw
 import serial.tools.list_ports
 import configparser
 from pathlib import Path
+import tomllib
 
 IDRAW_VID = 0x1A86
 IDRAW_PID = 0x8040
@@ -16,7 +17,7 @@ IDRAW_PID = 0x8040
 IGNORABLES = ["Ȣ"]
 
 SPECIAL_ASCIIS = [1, 8, 10, 13, 24, 127, curses.KEY_UP, curses.KEY_DOWN, curses.KEY_LEFT, curses.KEY_RIGHT]
-CONFIG_PATH = "./config.ini"
+PREFERENCES_PATH = "./preferences.ini"
 
 MIN_FONT_SIZE = 8.0
 MAX_FONT_SIZE = 500.0
@@ -262,7 +263,7 @@ class Status:
 
         # load config
         self.config = configparser.ConfigParser()
-        self.config.read(CONFIG_PATH)
+        self.config.read(PREFERENCES_PATH)
         self.set_available_fonts_from_config()
 
     def set_available_fonts_from_config(self):
@@ -296,7 +297,7 @@ class Status:
             self.config.add_section("settings")
         self.config.set("settings", "recently_used_font", font_file_to_use)
     
-        with open(CONFIG_PATH, "w") as f:
+        with open(PREFERENCES_PATH, "w") as f:
             self.config.write(f)
 
         self.font = HersheyFont(font_file_to_use)
@@ -307,13 +308,19 @@ class Status:
 def main(stdscr):
     canvas = CursesCanvas(stdscr, "Start typing :) ctrl-x to exit")
 
-    status = Status(font_size = 16.0, config_file_name = CONFIG_PATH)
+    status = Status(font_size = 16.0, config_file_name = PREFERENCES_PATH)
     status.load_recent_font_or_prompt_user(canvas)
+
+    with open("idraw.toml", "rb") as f:
+        idraw_config = tomllib.load(f)
 
     port = find_device()
     if port == None:
         raise RuntimeError("Could not find a compatable IDraw device.")
-    idraw = IDraw(port, 4, 2000)
+    idraw = IDraw(port = port,
+                  pen_down_height = idraw_config["configuration"]["pen_down_height"],
+                  default_speed = idraw_config["configuration"]["speed"]
+                  )
     drawer = Drawer(idraw, status.font, status.font_size)
     writing_service = Service(drawer)
 

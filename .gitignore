@@ -183,4 +183,4 @@ cython_debug/
 # SVG Fonts
 fonts/*.svg
 
-config.ini
+preferences.ini
