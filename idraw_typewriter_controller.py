@@ -45,9 +45,10 @@ class CursesCanvas():
         self.scroll_count = 0
         self.line_lengths = [0]
 
-        curses.init_pair(1, curses.COLOR_RED, curses.COLOR_BLACK)
-        curses.init_pair(2, curses.COLOR_GREEN, curses.COLOR_BLACK)
-        curses.init_pair(3, curses.COLOR_BLUE, curses.COLOR_BLACK)
+        curses.use_default_colors()
+        curses.init_pair(1, curses.COLOR_RED, -1)
+        curses.init_pair(2, curses.COLOR_GREEN, -1)
+        curses.init_pair(3, curses.COLOR_BLUE, -1)
 
         self.UNPROCESSED_COLOR = curses.color_pair(1)
         self.PROCESSING_COLOR = curses.color_pair(3)
