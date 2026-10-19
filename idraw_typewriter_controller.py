@@ -348,7 +348,7 @@ def main(stdscr):
                 status.prompt_user_to_select_font(canvas)
 
                 # update drawer's font and status bar
-                writing_service.enqueue(SetFontTask(status.font, callback_on_started, callback_on_finished))
+                writing_service.enqueue(SetFontTask(status.font, None, None))
                 canvas.update_bottom_text_bar(status.to_string())
 
             continue
